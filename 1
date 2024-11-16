@@ -1,0 +1,782 @@
+Импортируем библиотеки
+import pandas as pd
+import numpy as np
+​
+import requests
+from urllib.parse import urlencode
+​
+from tqdm.auto import tqdm
+from scipy.stats import norm 
+​
+import seaborn as sns
+import matplotlib.pyplot as plt
+​
+import re
+Далее, загрузим датасеты:
+
+# получаем прямую ссылку на файлы
+base_url = 'https://cloud-api.yandex.net/v1/disk/public/resources/download?'
+​
+​
+# ссылки на данные с указанием разделителя csv-файла
+links_dic = {
+    'groups':       ['https://disk.yandex.ru/d/58Us0DWOzuWAjg', ';'],
+    'groups_add':   ['https://disk.yandex.ru/d/3aARY-P9pfaksg', ','],
+    'active_studs': ['https://disk.yandex.ru/d/prbgU-rZpiXVYg', ','],
+    'checks':       ['https://disk.yandex.ru/d/84hTmELphW2sqQ', ';']
+            }
+​
+# скачиваем файлы
+for csv_filename, csv_link in links_dic.items():
+    final_url               = base_url + urlencode(dict(public_key=csv_link[0]))
+    response                = requests.get(final_url)
+    download_url            = response.json()['href']
+    globals()[csv_filename] = pd.read_csv(download_url, sep=csv_link[1])
+Посмотрим на данные:
+
+print(groups.head(),                              '\n')
+print(groups.info(),                              '\n')
+print('Уникальных ID в датасете:', groups.id.nunique())
+print(groups_add.head(),                              '\n')
+print(groups_add.info(),                              '\n')
+print('Уникальных ID в датасете:', groups_add.id.nunique())
+print(active_studs.head(),                                      '\n')
+print(active_studs.info(),                                      '\n')
+print('Уникальных ID в датасете:', active_studs.student_id.nunique())
+print(checks.head(),                                      '\n')
+print(checks.info(),                                      '\n')
+print('Уникальных ID в датасете:', checks.student_id.nunique())
+Проверим, учтены ли данные из groups_add в active_studs и checks:
+
+print('Количество учтенных ID в active_studs:', groups_add.query('id in @active_studs.student_id').shape[0], 
+      '\nКоличество учтенных ID в checks:',     groups_add.query('id in @checks.student_id').shape[0])
+Соединим датафрейм groups c датафреймом groups_add, т.к. второй является дополнением первого:
+
+groups_total = pd.concat([groups, groups_add])
+print('Количество строк было:', groups_add.id.count() + groups.id.count(), 
+      '\nКоличество строк после соединения:', pd.concat([groups, groups_add]).id.count(),
+      '\nВсе верно' if groups_add.id.count() + groups.id.count() == groups_total.id.count()
+                    else '\nНеверное количество')
+print('Распределение всех пользователей по группам: \nГруппа A:', 
+      groups_total.grp.value_counts()[1], '\nГруппа B:',
+      groups_total.grp.value_counts()[0], '\nВсего:   ',
+      groups_total.grp.value_counts()[1] +
+      groups_total.grp.value_counts()[0])
+paid_not_active = checks.query('student_id not in @active_studs.student_id')
+print('Количество пользователей из списка активных, но не вошедших в общий список:', 
+      active_studs.query('student_id not in @groups_total.id').shape[0],
+      '\nКоличество оплативших пользователей, отсутствующих в общем списке:',
+      checks.query('student_id not in @groups_total.id').shape[0],
+      '\nКоличество оплативших пользователей, отсутствующих в списке активных в дни проведения теста:',
+      paid_not_active.shape[0])
+Получается, что в период проведения экспериментов были оплаты и от тех студентов, которые не посещали платформу. Возможно, это автоматические оплаты.
+
+print('Распредление checks по группам: \nГруппа A:', 
+      groups_total.query('id in @checks.student_id').grp.value_counts()[0], '\nГруппа B:',
+      groups_total.query('id in @checks.student_id').grp.value_counts()[1], '\nВсего:   ', 
+      groups_total.query('id in @checks.student_id').grp.value_counts()[0] + 
+      groups_total.query('id in @checks.student_id').grp.value_counts()[1])
+print('Оплатили, но не в списке активных, количество по группам:\nГруппа A:', 
+      groups_total.query('id in @paid_not_active.student_id').grp.value_counts()[1], '\nГруппа B:',
+      groups_total.query('id in @paid_not_active.student_id').grp.value_counts()[0], '\nВсего:   ',
+      groups_total.query('id in @paid_not_active.student_id').grp.value_counts()[1] + 
+      groups_total.query('id in @paid_not_active.student_id').grp.value_counts()[0])
+print('Распределение active_studs по группам: \nГруппа A:', 
+      groups_total.query('id in @active_studs.student_id').grp.value_counts()[1], '\nГруппа B:',
+      groups_total.query('id in @active_studs.student_id').grp.value_counts()[0], '\nВсего:   ',
+      groups_total.query('id in @active_studs.student_id').grp.value_counts()[1] + 
+      groups_total.query('id in @active_studs.student_id').grp.value_counts()[0])
+print('Активные оплатившие пользователи, количество по группам: \nГруппа A:', 
+      groups_total.query('id in @active_studs.student_id & id in @checks.student_id').grp.value_counts()[1], '\nГруппа B:',
+      groups_total.query('id in @active_studs.student_id & id in @checks.student_id').grp.value_counts()[0], '\nВсего:   ',
+      groups_total.query('id in @active_studs.student_id & id in @checks.student_id').grp.value_counts()[1] +
+      groups_total.query('id in @active_studs.student_id & id in @checks.student_id').grp.value_counts()[0])
+print('Активные, но не оплатившие пользователи, количество по группам: \nГруппа A:', 
+      groups_total.query('id in @active_studs.student_id & id not in @checks.student_id').grp.value_counts()[1], '\nГруппа B:',
+      groups_total.query('id in @active_studs.student_id & id not in @checks.student_id').grp.value_counts()[0], '\nВсего:   ',
+      groups_total.query('id in @active_studs.student_id & id not in @checks.student_id').grp.value_counts()[1] +
+      groups_total.query('id in @active_studs.student_id & id not in @checks.student_id').grp.value_counts()[0])
+Подвем небольшой итог изобразив проанализированную информацию в виде диаграммы Эйлера-Венна:
+
+
+
+Итак, у нас есть активные пользователи, те, что заходили на сайт в дни проведения теста и есть пользователи, которые совершили платежи. Активные с оплатившими пересекаются только частично, отсюда возникает вопрос: кто те пользователи, которые оплатили, но не попали в список активных? Из постановки задачи это не ясно, возможно это автоматические платежи, а возможно сбой системы и все оплатившие являются активными. Так как у нас нет возможности прояснить это, уберём из выборки оплативших не активных. Т.е. оплативших будем брать только тех, одновременно является и оплатившим, и активным (пересечение active_studs и checks - 392 человека).
+
+Пользователи распределены по группам неравномерно. Группа B значительно больше, чем группа А.
+
+Объединим список активных пользователей со списком оплативших, отбросив из последних тех, кого нет в списке активных:
+
+active_checks = (
+                active_studs
+                .merge(checks, how='left', on='student_id')
+                .rename(columns={'student_id': 'id'})
+                )
+active_checks.query('rev.notna()').head()
+Объединим активных оплативших из предыдущего шага с groups_total, оставив только активных:
+
+active_total = groups_total.merge(active_checks, how='right', on='id')
+Добавим колонку со статусом оплаты (0 - не оплачен, 1 - оплачен):
+
+active_total['payment'] = active_total.rev.apply(lambda x: 0 if np.isnan(x) else 1)
+active_total.query('rev.isna()').head()
+Заменим NaN на нули:
+
+active_total['rev'] = active_total.rev.fillna(0)
+Сформируем датафрейм со всей собранной информацией. Активные + оплатившие:
+
+active_total_paid = active_total.query('rev > 0')
+active_total_paid.head()
+Группа А:
+
+a_group = active_total.query('grp == "A"')
+a_group.head()
+Активные оплатившие пользователи, группа А:
+
+a_group_paid = a_group.query('rev > 0')
+a_group_paid.head()
+Активные пользователи, группа B:
+
+b_group = active_total.query('grp == "B"')
+b_group.head()
+Активные оплатившие пользователи, группа B:
+
+b_group_paid = b_group.query('rev > 0')
+b_group_paid.head()
+Распределение группы А (все пользователи):
+
+a_group.rev.hist(bins=50)
+sns.despine()
+Распределение группы В (все пользователи):
+
+b_group.rev.hist(bins=50)
+sns.despine()
+Распределение группы А (только купившие):
+
+a_group_paid.rev.hist(bins=50)
+sns.despine()
+Распределение группы В (только купившие):
+
+b_group_paid.rev.hist(bins=50)
+sns.despine()
+Сравним описательную статистику по всем пользователям в двух группах:
+
+a_group_descr = a_group.rev.describe().to_frame().rename(columns={'rev': 'Группа В'})
+b_group_descr = b_group.rev.describe().to_frame().rename(columns={'rev': 'Группа А'})
+pd.concat([a_group_descr, b_group_descr], axis=1)
+Сравним описательную статистику по оплатившим пользователям в двух группах:
+
+a_group_descr = a_group_paid.rev.describe().to_frame().rename(columns={'rev': 'Группа А'})
+b_group_descr = b_group_paid.rev.describe().to_frame().rename(columns={'rev': 'Группа В'})
+pd.concat([a_group_descr, b_group_descr], axis=1)
+Посмотрим на выборосы (все пользователи):
+
+sns.boxplot(data=active_total, y='rev', x='grp')
+sns.despine()
+Посмотрим на выборосы (купившие):
+
+sns.boxplot(data=active_total_paid, y='rev', x='grp')
+sns.despine()
+Считаю, что следует выбрать следующие метрики:
+
+CR (конверсия онлайн платежей) - отношение количества оплативших клиентов к общему числу активных клиентов. Может отражать юзабилити новой механики оплаты. Например часть пользователей не оплачивают т.к. сталкиваются с трудностями при оплате. Следовательно, CR выше в том варианте, где пользователю проще проивзести оплату.
+ARPU - отношение общей суммы на количество активных пользователей. Важный показатель для бизнеса, при увеличении этого показателя бизнес получает больше денег.
+ARPPU - отношение общей суммы на количество активных оплативших пользователей. Причины выбора этой метрики такие же, как и в случае с ARPU.
+print('\033[1mCR \033[0m\nКонверсия оплативших пользователей:\nГруппа А:', 
+                                             round(a_group_paid.id.count() / a_group.id.count(), 4),
+                                             '\nГруппа В:', 
+                                             round(b_group_paid.id.count() / b_group.id.count(), 4),
+      '\nКонверсия у группы B на', abs(round((round(b_group_paid.id.count() / b_group.id.count(), 4) - 
+                                   round(a_group_paid.id.count() / a_group.id.count(), 4)) / 
+                                   round(a_group_paid.id.count() / a_group.id.count(), 4), 3) * 100), '%',
+      'больше, чем у группы А' if round((round(b_group_paid.id.count() / b_group.id.count(), 4) - 
+                                  round(a_group_paid.id.count() / a_group.id.count(), 4)) / 
+                                  round(a_group_paid.id.count() / a_group.id.count(), 4), 3) * 100 > 0 
+                               else 'меньше, чем у группы А')
+​
+print('\n\033[1mARPPU \033[0m\nОтношение общей суммы на количество активных оплативших пользователей:\nГруппа А:',
+                                                                                      round(a_group_paid.rev.mean(), 2), 
+                                                                                     '\nГруппа В:', 
+                                                                                      round(b_group_paid.rev.mean(), 2),
+      '\nARPPU группы В на', round(round(b_group_paid.rev.mean() - a_group_paid.rev.mean(), 2) /
+                             round(a_group_paid.rev.mean(), 2) * 100, 2),'%',
+      'больше, чем у группы А' if round(round(b_group_paid.rev.mean() - a_group_paid.rev.mean(), 2) /
+                                  round(a_group_paid.rev.mean(), 2) * 100, 2) > 0 
+                               else 'меньше, чем у группы А/n')
+​
+print('\n\033[1mARPU\033[0m\nОтношение общей суммы на количество активных пользователей:\nГруппа А:',
+                                                                          round(a_group_paid.rev.sum() / a_group.id.count(), 2),
+                                                                          '\nГруппа В:', 
+                                                                          round(b_group_paid.rev.sum() / b_group.id.count(), 2),
+      '\nARPU группы В на', 
+      round((round(b_group_paid.rev.sum() / b_group.id.count(), 2) - round(a_group_paid.rev.sum() / a_group.id.count(), 2)) /
+      round(a_group_paid.rev.sum() / a_group.id.count(), 2) * 100, 2), '%',
+      'больше, чем у группы А' if 
+      round((round(b_group_paid.rev.sum() / b_group.id.count(), 2) - round(a_group_paid.rev.sum() / a_group.id.count(), 2)) /
+      round(a_group_paid.rev.sum() / a_group.id.count(), 2) * 100, 2) > 0
+                               else 'меньше, чем у группы А')
+Имеются ли различия в показателях и с чем они могут быть связаны?
+Наблюдаем отрицательный эффект CR, и положительные эффекты в ARPU и ARPPU. Другими словами: конверсия падает, но доход на пользователя/покупателя растёт. Это может быть связано c отсечением части пользователей платящих малые суммы с одновременным увеличением среднего чека.
+
+Являются ли эти различия статистически значимыми?
+Размеры групп очень сильно отличаются, поэтому классические тесты могут давать большие погрешности. В таких случаях идеально подходит bootstrap.
+
+Строим bootstrap распределения для групп А и B.
+Вычислим их разницу.
+В получившемся рапределении разницы находим доверительных интервал.
+Проверяем, попадает ли доверительный интервал в 0. Если да, то нулевая гипотеза на данном уровне значимости принимается, если нет - отвергается.
+Напишем функцию, которая позволит проверять гипотезы с помощью bootstrap:
+
+# функция для проверки гипотез с помощью бутстрапа
+def get_bootstrap(
+    data_column_1,                       # числовые значения первой (контрольной) выборки
+    data_column_2,                       # числовые значения второй (тестовой) выборки
+    boot_it   = 1000,                    # количество бутстрэп-подвыборок
+    statistic = np.mean,                 # интересующая нас статистика
+    bootstrap_conf_level = 0.95,         # уровень значимости
+    graph         = True,                # отрисовывать ли график
+    show_progress = True                 # показывать ли индикатор програсса
+    ):
+    boot_len  = max([len(data_column_1), len(data_column_2)])
+    boot_data = []
+    
+    # выбираем отрисовывать индикатора програсса или нет
+    if show_progress:
+        progress_bar = tqdm
+    else:
+        progress_bar = lambda x: x
+    
+    for i in progress_bar(range(boot_it)):        # извлекаем подвыборки
+        samples_1 = data_column_1.sample(
+            boot_len, 
+            replace = True                        # параметр возвращения
+        ).values
+        
+        samples_2 = data_column_2.sample(
+            boot_len, 
+            replace = True
+        ).values
+        
+        samples_delta = samples_2 - samples_1      # находим разницу подвыборок
+        boot_data.append(statistic(samples_delta)) # применяем статистику для разниц подвыборок
+        
+    pd_boot_data = pd.DataFrame(boot_data)
+​
+    # доверительный интервал 
+    left_quant  = (1 - bootstrap_conf_level)/2
+    right_quant = 1 - (1 - bootstrap_conf_level) / 2
+    ci = pd_boot_data.quantile([left_quant, right_quant])
+        
+    p_1 = norm.cdf(
+        x     = 0, 
+        loc   = np.mean(boot_data), 
+        scale = np.std(boot_data)
+    )
+    p_2 = norm.cdf(
+        x     = 0, 
+        loc   = -np.mean(boot_data), 
+        scale = np.std(boot_data)
+    )
+    p_value = min(p_1, p_2) * 2
+        
+    # отисовка графиков
+    if graph == True:
+        plt.hist(pd_boot_data[0], bins = 50)
+        plt.style.use('ggplot')
+        plt.vlines(ci, ymin=0, ymax=50, linestyle='--')
+        plt.xlabel('boot_data')
+        plt.ylabel('frequency')
+        plt.title("Histogram of boot_data")
+        plt.show()
+       
+    return {"ci": ci, 
+            "p_value": p_value}
+Определим функции для метрик:
+
+def cr_func(x):
+    '''
+    CR
+    Для корректной работы функции в качестве аргумента y 
+    необходимо передать серию со значениями 1 и 0, или True и False,
+    в соответствие с тем произошло ожидаемое событие или нет.
+    '''
+    return sum(x) / len(x)
+​
+def arpu_func(y):
+    '''
+    ARPU
+    Для корректной работы функции в качестве аргумента y 
+    необходимо передать серию, где все NaN-значения заменнены на нули
+    '''
+    return np.mean(y)
+​
+def arppu_func(y):
+    '''
+    ARPPU
+    Для корректной работы функции в качестве аргумента y 
+    необходимо передать серию, где отобраны только платежи, т.е. отфильтрованы нули
+    или вместо нулей стоят NaN.
+    '''
+    return np.mean(y)
+CR
+Сформулируем нулевую и альтернативную гипотезы:
+
+H0: CR в двух группах одинаковые.
+H1: CR в двух группах различаются.
+get_bootstrap(a_group.payment, b_group.payment, statistic = cr_func)
+Доверительный интервал попадает в 0, недостаточно оснований отвергнуть нулевую гипотезу. Нельзя утверждать, что различия CR в двух группах есть.
+
+ARPU
+Сформулируем нулевую и альтернативную гипотезы:
+
+H0: ARPU в двух группах одинаковые.
+H1: ARPU в двух группах различаются.
+get_bootstrap(a_group.rev, b_group.rev, statistic = arpu_func)
+Доверительный интервал не попадает в 0, отвергаем нулевую гипотезу. ARPU в двух группах различаются.
+
+ARPPU
+Сформулируем нулевую и альтернативную гипотезы:
+
+H0: ARPPU в двух группах одинаковые.
+H1: ARPPU в двух группах различаются.
+get_bootstrap(a_group.rev[a_group.rev > 0], b_group.rev[b_group.rev > 0], statistic = arppu_func)
+Доверительный интервал не попадает в 0, отвергаем нулевую гипотезу. ARPPU в двух группах различаются.
+
+Стоит ли запускать новую механику на всех пользователей?
+Да, новая механика оплаты даёт статистически значимый прирост в метриках ARPU и ARPPU, отрицательное изменение метрики CR не подтвердилось.
+
+Задание 2. SQL
+2.1 Очень усердные ученики
+Сопоставим все термины для понимания:
+
+карточки = задания = горошины,
+студент = ученик,
+усердный - 20 горошин (карточек / заданий) в месяц,
+очень усердный - 20 горошин (карточек / заданий) в час.
+Ищем количетсво очень усердных студентов за март 2020, т.е. тех кто в течение марта 2020 смог выполнить хотя бы один раз 20 горошин в течение часа.
+
+SELECT 
+    COUNT(DISTINCT sq.st_id) AS hardworking_students          -- считаем количество отобранных уникальных студентов 
+FROM (                                                        -- подзапрос
+    SELECT  
+        st_id, 
+        timest,
+        SUM(correct) OVER W AS peas_per_hour                  -- считаем кличество правильно решённых горошин в окне (в час)
+    FROM peas
+    WHERE 
+        extract(Month from timest) = 3                        -- месяц = 3 (март)
+        AND 
+        extract(Year from timest) = 2020                      -- год = 2020
+    WINDOW W AS (
+            PARTITION BY st_id                                -- группируем по id студента
+            ORDER BY timest                                   -- сортируем по времени
+            RANGE BETWEEN '1 hour' PRECEDING AND CURRENT ROW) -- выбираем окно с 1 часа назад до текущей строки
+    ) AS sq
+WHERE sq.peas_per_hour >= 20                                  -- отбираем только тех где количество горошин в час >= 20
+2.2 Оптимизация воронки
+Активным будем считать тех, кто хотя бы раз выполнил 30 заданий в день. Т.е. те, кто столкнулся с лимитом выполнения задач.
+
+ARPU (Average Revenue Per User ) - отношение выручки к общему количеству пользователей.
+ARPAU (Average Revenue Per Active User) - отношение выручки к количеству активных пользователей.
+CR в покупку - отношение количества купивших пользователей к общему количеству пользователей.
+СR активного пользователя в покупку - отношение количества купивших активных пользователей к общему количеству активных пользователей.
+CR пользователя из активности по математике (subject = ’math’) в покупку курса по математике - отношение количества купивших активных в математике пользователей к общему количеству активных в математике пользователей.
+План
+Из таблицы peas получим список уникальных пользователей с отметками "0" или "1" об активности в целом.
+Из таблицы peas получим список уникальных пользователей с отметками "0" или "1" об активности в математике.
+Из таблицы studs получим данные о принадлежности пользователя к группе (test/control).
+Из таблицы checks получим список оплативших пользователей со значениями "0" и "1" для купивших любой предмет и купивших математику.
+Джойним 4 подзапроса.
+Агрегируем полученные поля для подсчёта нужных метрик.
+1. Из таблицы peas получим список уникальных пользователей с отметками "0" или "1" об активности в целом.
+(-- АКТИВНЫЕ ПОЛЬЗОВАТЕЛИ
+SELECT actives.st_id, 
+    MAX(CASE WHEN actives.peas_per_day >= 30 THEN 1 ELSE 0 END) AS active_in_total
+FROM 
+    (
+    SELECT                                            -- считаем количество горошин в день 
+        st_id, 
+        timest, 
+        SUM(correct) OVER W AS peas_per_day, 
+        subject
+    FROM peas 
+    WINDOW W AS (
+            PARTITION BY st_id                        -- группировка по студентам
+            ORDER BY timest
+            RANGE BETWEEN '1 day' PRECEDING AND CURRENT ROW
+            ) 
+    ) AS actives
+GROUP BY st_id
+) AS at
+В разделе SELECT используется конструкция CASE WHEN actives.peas_per_day >= 30 THEN 1 ELSE 0 END - это аналог IF, который позволяет в SELECTe заменять null-значения на 0.
+В подзапросе этого подзапроса в строке SUM(correct) OVER W AS peas_per_day мы с помощью окна W находим сумму правильно решёных задач. Т.к. поле correct содержит значения 0 для нерешённых и 1 для решённых, то такой запрос позволяет нам найти количество решённых задач в день.
+Параметры окна указываются после ключевого слова WINDOW. PARTITION BY st_id - группировать по студентам, ORDER BY timest - этот параметр одновременно и сортирует и указывает по какому полю будем брать окно, в данном случае - это время выполнения задачи.
+2. Из таблицы peas получим список уникальных пользователей с отметками "0" или "1" об активности в математике.
+(-- АКТИВНЫЕ ПОЛЬЗОВАТЕЛИ по математике
+SELECT active_by_subj.st_id, 
+    MAX(CASE WHEN active_by_subj.math_per_day >= 30 THEN 1 ELSE 0 END) AS active_in_math
+FROM 
+    (
+    SELECT     -- считаем количество горошин в день по предметам
+        st_id, 
+        timest, 
+        SUM(correct) OVER W2 AS math_per_day, 
+        subject
+    FROM peas 
+    WINDOW W2 AS (
+            PARTITION BY st_id, subject                       -- группировка по студентам  и предметам
+            ORDER BY timest
+            RANGE BETWEEN '1 day' PRECEDING AND CURRENT ROW
+            ) 
+    ) AS active_by_subj
+Данный подзапрос аналогичен предыдущему.
+
+3. Из таблицы studs получим данные о принадлежности пользователя к группе (test/control).
+Здесь мы просто джойним таблицу studs без дополнительных преобразований.
+
+JOIN 
+    -- ОТМЕТКИ test / control
+    studs     
+ON at.st_id = studs.st_id
+4. Из таблицы checks получим список оплативших пользователей со значениями "0" и "1" для купивших любой предмет и купивших математику.
+--ПОКУПКА ЛЮБОГО ПРЕДМЕТА, ПОКУПКА МАТЕМАТИКИ
+(
+SELECT st_id, SUM(money) AS money,
+    1 AS sale_subject,
+    MAX(CASE WHEN subject = 'math' THEN 1 ELSE 0 END) AS sale_math
+FROM checks 
+GROUP BY st_id
+) AS s
+В этом подзапросе формируем две колонки, одна из которых sale_subject будет заполнена единицами, что говорит о совершении покупки пользователем (все единицы, т.к. это список купишвих пользователей, здесь нет других). Во второй sale_math - назначаем 1 пользователю купившему математику и 0 не купившему.
+
+5. Джойним 4 подзапроса.
+6. Агрегируем полученные поля для подсчёта нужных метрик.
+Результирующий запрос
+SELECT 
+    studs.test_grp, 
+    COALESCE(SUM(s.money), 0) / COUNT(at.st_id) AS ARPU,
+    COALESCE(SUM(s.money), 0) / SUM(at.active_in_total) AS ARPAU,
+    COALESCE(SUM(s.sale_subject), 0)::float / COUNT(at.st_id) AS CR,
+    SUM(CASE WHEN at.active_in_total = 1 AND s.sale_subject = 1 THEN 1 ELSE 0 END)::float / SUM(at.active_in_total) AS СR_active,
+    SUM(CASE WHEN am.active_in_math = 1 AND s.sale_math = 1 THEN 1 ELSE 0 END)::float / SUM(am.active_in_math) AS CR_math
+FROM
+    (-- АКТИВНЫЕ ПОЛЬЗОВАТЕЛИ
+    SELECT actives.st_id, 
+        MAX(CASE WHEN actives.peas_per_day >= 30 THEN 1 ELSE 0 END) AS active_in_total
+    FROM 
+        (
+        SELECT     -- считаем количество горошин в день 
+            st_id, 
+            timest, 
+            SUM(correct) OVER W AS peas_per_day, 
+            subject
+        FROM peas 
+        WINDOW W AS (
+                PARTITION BY st_id                        -- группировка по студентам
+                ORDER BY timest
+                RANGE BETWEEN '1 day' PRECEDING AND CURRENT ROW
+                ) 
+        ) AS actives
+    GROUP BY st_id
+    ) AS at
+INNER JOIN
+    (-- АКТИВНЫЕ ПОЛЬЗОВАТЕЛИ по математике
+    SELECT active_by_subj.st_id, 
+        MAX(CASE WHEN active_by_subj.math_per_day >= 30 THEN 1 ELSE 0 END) AS active_in_math
+    FROM 
+        (
+        SELECT     -- считаем количество горошин в день по предметам
+            st_id, 
+            timest, 
+            SUM(correct) OVER W2 AS math_per_day, 
+            subject
+        FROM peas 
+        WINDOW W2 AS (
+                PARTITION BY st_id, subject                       -- группировка по студентам  и предметам
+                ORDER BY timest
+                RANGE BETWEEN '1 day' PRECEDING AND CURRENT ROW
+                ) 
+        ) AS active_by_subj
+    GROUP BY st_id
+    ) AS am
+ON at.st_id = am.st_id
+INNER JOIN 
+    -- отметки test / control
+    studs     
+ON at.st_id = studs.st_id
+LEFT JOIN
+    --покупка любого предмета, покупка математики
+    (
+    SELECT st_id, SUM(money) AS money,
+        1 AS sale_subject,
+        MAX(CASE WHEN subject = 'math' THEN 1 ELSE 0 END) AS sale_math
+    FROM checks 
+    GROUP BY st_id
+    ) AS s
+ON at.st_id = s.st_id
+GROUP BY test_grp
+Пояснения по блоку SELECT
+1. studs.test_grp -- колонка со значением групп: test и control.
+2. COALESCE(SUM(s.money), 0) / COUNT(at.st_id) AS ARPU -- функция COALESCE() позволяет в данном случае заменить null на 0 и корректно посчитать сумму.
+3. COALESCE(SUM(s.money), 0) / SUM(at.active_in_total) AS ARPAU -- точно также, как и в предыдущем случае функция COALESCE() заменяет null на 0.
+4. COALESCE(SUM(s.sale_subject), 0)::float / COUNT(at.st_id) AS CR -- точно также COALESCE() заменяет null на 0 и, т.к. и в числителе и в знаменателе целые числа, то и результат получается тоже целочисленным (в данном случае 0), чтобы исправить это переводим числитель во float (::float).
+5. SUM(CASE WHEN at.active_in_total = 1 AND s.sale_subject = 1 THEN 1 ELSE 0 END)::float / SUM(at.active_in_total) AS СR_active -- здесь для отбора активных дополнительно используем конструкцию CASE END - это аналог IF. Для подсчёта СR_active отбираем только активных.
+6. SUM(CASE WHEN am.active_in_math = 1 AND s.sale_math = 1 THEN 1 ELSE 0 END)::float / SUM(am.active_in_math) AS CR_math -- аналогичным образом отбираем только активных в математике.
+Задание 3. Python
+Предположим, что у нас уже есть рабочий датафрейм:
+
+# рабочий датафрэйм
+total_test = (
+    groups
+    .merge(
+        active_studs
+            .assign(activity=1)
+            .rename(columns={'student_id': 'id'})
+        ,on='id', how='outer'
+        )
+    .merge(
+        checks
+            .assign(payment = 1)
+            .rename(columns={'student_id': 'id'})
+        ,on='id', how='outer'
+    )
+    .assign(step=0)
+)
+total_test.head()
+У нас имеется ссылка на дополнительный файл (на Яндекс.Диске, или локально):
+
+# ссылка на дополнительный файл
+add_csv_link = 'https://disk.yandex.ru/d/3aARY-P9pfaksg'
+# или add_csv_link = 'group_add.csv'
+Напишем несколько вспомогательных функций:
+
+# выделяем активных, заполняем пропуски нулями
+def get_active(df, to_dropna_ls=['activity', 'grp'], to_fillna_ls=['payment', 'rev']):
+    '''
+    df - датафрейм
+    to_dropna_ls - указываем список колонок датафрэйма, по которым удаляем строки с NaN
+    to_fillna_ls - указываем список колонок датафрэйма, по которым NaN заполняем нулями 
+    '''
+    df = (df
+         .copy()
+         .dropna(subset=to_dropna_ls)
+         )
+    for i in to_fillna_ls:
+        df[i] = df[i].fillna(0)
+    return df
+​
+​
+# определяем разделитель в csv-файле
+def get_sep(file_link):
+    with open(file_link, 'r') as file:
+        temp = file.readline()
+    pattern = re.compile(r'\w*([,;])\w*')
+    return pattern.findall(temp)[0]
+​
+​
+# переименовываем колонки в соответствие с типом данных
+def columns_renamer(df):
+    if str(df.iloc[0, 0]).isalpha():
+        df.columns = ['grp', 'id']
+    else:
+        df.columns = ['id', 'grp']
+Далее, напишем функцию, которая будет автоматически подгружать информацию из дополнительного файла groups_add.csv и пересчитывать метрики:
+
+def get_update(work_df, add_csv_link, final=False):
+    '''
+    Функция обновления данных и пересчёта метрик.
+    На выходе поучаем датафрэйм со значениями метрик и p-value, 
+    каждая строка - новый степ добавления данных (номер обновления показан в колонке step, 
+    шаг 0 - значения без доп. файла/обновления)
+    work_df       - объединённый дф из groups.csv, active_studs.csv, checks.csv (получены в первый раз).
+    add_csv_link  - ссылка на дополнительный файл groups_add.csv, 
+                    возможно использование web-ссылки на Яндекс.Диск, или ссылки на файл в файловой системе.
+    final         - если True, выведет только последнюю (финальную) строку таблицы.
+    '''
+    if add_csv_link.startswith('https://'):
+​
+        # скачиваем дополнительный файл
+        final_url    = base_url + urlencode(dict(public_key=add_csv_link))
+        response     = requests.get(final_url)
+        download_url = response.json()['href']
+        group_add_df = pd.read_csv(download_url, sep=',')
+​
+        # загружаем файл и сохраняем его
+        download_response = requests.get(download_url)
+        with open('group_add.csv', 'wb') as f:
+            f.write(download_response.content)
+​
+        # открываем файл
+        group_add_df = pd.read_csv('group_add.csv', sep=get_sep('group_add.csv'))
+​
+    else:
+        # открываем файл
+        group_add_df = pd.read_csv(add_csv_link, sep=get_sep(add_csv_link))
+​
+    # переименуем колонки в соответствие с типом данных
+    columns_renamer(group_add_df)
+    
+    # объединяем основной дф с дополнительным
+    work_df          = work_df.merge(group_add_df, on='id', how='outer')
+    work_df['grp_x'] = work_df.grp_x.fillna('')                  # заполняем пропуски пустым символом
+    work_df['grp_y'] = work_df.grp_y.fillna('')                  # заполняем пропуски пустым символом
+    work_df['grp']   = work_df.grp_x + work_df.grp_y             # объединяем колонки групп
+    work_df          = work_df.drop(['grp_x', 'grp_y'], axis=1)  # удаляем колонки grp_x и grp_y
+    
+    # присваиваем значения step в добавленных строках
+    mask = work_df.id.isin(group_add_df.id)             # назначаем маску, согласно которой будем присваивать новый номер степа
+    work_df.loc[mask, 'step'] = work_df.step.max() + 1  # присваиваем номер степа
+    work_df['step'] = work_df.step.astype('int')        # переводим колонку степ в int
+​
+    # оставим только активных
+    work_df = get_active(work_df)
+    
+    # пересчитаем метрики, каждый цикл - новое добавление файла groups_add
+    df_ab = pd.DataFrame()  # пустой дф для заполнения через цикл
+​
+    for i in range(work_df.step.max() + 1):  # итеритуемся по максимальному значению колонки step +1
+        # фильтруем датасет для рассчёта метрик
+        payment_a      = work_df.query('step <= @i and grp =="A"').payment               
+        payment_b      = work_df.query('step <= @i and grp =="B"').payment
+        rev_all_a      = work_df.query('step <= @i and grp =="A"').rev
+        rev_all_b      = work_df.query('step <= @i and grp =="B"').rev
+        rev_positive_a = work_df.query('step <= @i and rev > 0 and grp =="A"').rev
+        rev_positive_b = work_df.query('step <= @i and rev > 0 and grp =="B"').rev
+​
+        #CR_a
+        cr_a = cr_func(payment_a)
+        #CR_b
+        cr_b = cr_func(payment_b)
+        #CR p-value
+        cr_p_value = get_bootstrap(payment_a, 
+                                   payment_b,
+                                   statistic=cr_func,
+                                   graph = False,
+                                   show_progress = False
+                     )["p_value"]
+        #ARPU_a
+        arpu_a = arpu_func(rev_all_a)
+        #ARPU_b
+        arpu_b = arpu_func(rev_all_b)
+        #ARPU p-value
+        arpu_p_value = get_bootstrap(rev_all_a, 
+                                     rev_all_b,
+                                     statistic=arpu_func,
+                                     graph = False,
+                                     show_progress = False
+                       )["p_value"]
+        #ARPPU_a
+        arppu_a       = arppu_func(rev_positive_a)
+        #ARPPU_b
+        arppu_b       = arppu_func(rev_positive_b)
+        #ARPPU p-value
+        arppu_p_value = get_bootstrap(rev_positive_a,
+                                      rev_positive_b,
+                                      statistic=arppu_func,
+                                      graph = False,
+                                      show_progress = False
+                        )["p_value"]
+​
+        # временный датафрэйм
+        temp_df = pd.DataFrame([[cr_a, 
+                                 cr_b, 
+                                 cr_p_value, 
+                                 arpu_a, 
+                                 arpu_b, 
+                                 arpu_p_value, 
+                                 arppu_a, 
+                                 arppu_b, 
+                                 arppu_p_value]],
+                               columns=['CR_A',
+                                        'CR_B',
+                                        'CR_p-value',
+                                        'ARPU_A',
+                                        'ARPU_B',
+                                        'ARPU_p-value', 
+                                        'ARPPU_A',
+                                        'ARPPU_B',
+                                        'ARPPU_p-value'])
+        # добавляем строку в итоговый дф
+        df_ab = pd.concat([df_ab, temp_df])      
+    
+    # сбрасываем индексы
+    df_ab.reset_index(drop=True, inplace=True)  
+    df_ab['step'] = df_ab.index
+    
+    if final == True:
+        return df_ab.tail(1)
+    
+    return df_ab
+В функцию get_update передадим предварительно сформированный датафрейм total_test:
+
+metrix = get_update(total_test, add_csv_link)
+metrix
+Напишем функцию отрисовки графиков:
+
+def get_graphs(df):
+    '''
+    Функция построения графика на основе датасэта, сформированного функцией get_update
+    Шесть графиков: 
+    по оси X - номер обновления (колонка step в передаваемом дф), показывает 
+    какой раз обновились данные (некий аналог временной шкалы, т.к. не известны даты создания 
+    дополнительных файлов)
+    по оси Y - метрики (верхний ряд графиков) и p-value этих метрик (нижний ряд графиков)
+    '''
+    # формируем датафрэйм для отрисовки метрик
+    metrix_df = pd.DataFrame(columns = ['step', 'group'])                     # создаём пустой финальный дф для построения графиков метрик
+    for i in ['CR_', 'ARPU_', 'ARPPU_']:                                      # список части названий колонок для отбора
+        cols    = df.filter(like = i).columns                                 # отбираем колонки содержащие названия метрик
+        temp_df = pd.DataFrame()                                              # создаём пустой дф
+        for j in cols[:2]:                                                    # итерируемся по названиям колонок, кроме p-value
+            tmp_row         = df[[j, 'step']] \
+            .assign(group = j[-1:]) \
+            .rename(columns = {j: j[:-2]})  # формируем строку нового дф
+            temp_df         = pd.concat([temp_df, tmp_row])                   # добавляем строку в промежуточный дф
+        metrix_df = metrix_df \
+                    .merge(temp_df, on=['step', 'group'], how='right')        # объединяем промежуточный дф с финальным
+    
+    # формируем блок из 6 графиков
+    figure, axes = plt.subplots(2, 3, sharex=True, figsize=(16,7))   
+    
+    # заголовок
+    figure.suptitle('Метрики и p-value', fontsize=20)
+    
+    # графики CR и p-value для CR
+    sns.lineplot(ax=axes[0, 0], data=metrix_df, x='step', y='CR', hue='group', linewidth=2)
+    ax1 = sns.lineplot(ax=axes[1, 0], data=df, x='step', y='CR_p-value', linewidth=2, color="#5fa0c6", label='p-value')
+    ax1.axhline(0.05, ls='--', linewidth=1.5, color=(1, 0, 0, 0.7), label='p-value = 0.05')
+    ax1.set_ylabel('P-value для CR')
+    ax1.set_xlabel('Номер обновления')
+    ax1.legend()
+    
+    # графики ARPU и p-value для ARPU
+    sns.lineplot(ax=axes[0, 1], data=metrix_df, x='step', y='ARPU', hue='group', linewidth=2)
+    ax2 = sns.lineplot(ax=axes[1, 1], data=df, x='step', y='ARPU_p-value', linewidth=2, color="#5fa0c6", label='p-value')
+    ax2.axhline(0.05, ls='--', linewidth=1.5, color=(1, 0, 0, 0.7), label='p-value = 0.05')
+    ax2.set_ylabel('P-value для ARPU')
+    ax2.set_xlabel('Номер обновления')
+    ax2.legend()
+    
+    # графики ARPPU и p-value для ARPPU
+    sns.lineplot(ax=axes[0, 2], data=metrix_df, x='step', y='ARPPU', hue='group', linewidth=2)
+    ax3 = sns.lineplot(ax=axes[1, 2], data=df, x='step', y='ARPPU_p-value', linewidth=2, color="#5fa0c6", label='p-value')
+    ax3.axhline(0.05, ls='--', linewidth=1.5, color=(1, 0, 0, 0.7), label='p-value = 0.05')
+    ax3.set_ylabel('P-value для ARPPU ')
+    ax3.set_xlabel('Номер обновления')
+    ax3.set_xticks(range(0, metrix_df.step.max() + 1))  # сделаем шаг по оси х = 1
+    ax3.legend()
+    
+    # устанавливаем лимиты на ось y
+    plt.gcf().get_axes()[0].set_ylim(0, metrix_df.CR.max() * 1.1)                  
+    plt.gcf().get_axes()[1].set_ylim(0, metrix_df.ARPU.max() * 1.1)
+    plt.gcf().get_axes()[2].set_ylim(0, metrix_df.ARPPU.max() * 1.1)
+    plt.gcf().get_axes()[3].set_ylim(-0.001, max(0.05, metrix['CR_p-value'].max()) * 1.1)
+    plt.gcf().get_axes()[4].set_ylim(-0.001, max(0.05, metrix['ARPU_p-value'].max()) * 1.1)
+    plt.gcf().get_axes()[5].set_ylim(-0.001, max(0.05, metrix['ARPPU_p-value'].max()) * 1.1)
+    
+    # добавляем расстояния между графиками
+    plt.subplots_adjust(top=0.92, hspace = 0.1, wspace=0.3)
+В функцию get_graphs передадим метрики, записанные в переменную metrix:
+
+get_graphs(metrix)
+Таким образом, используя функции get_update и get_graphs мы можем в несколько кликов получить метрики и графики с учетом новых данных.
+
